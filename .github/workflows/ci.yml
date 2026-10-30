@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *" # nightly long fuzz run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  STELLAR_CLI_VERSION: 28.1.0
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show # installs the toolchain pinned in rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: stellar-cli@${{ env.STELLAR_CLI_VERSION }}
+      - name: Build contract
+        run: stellar contract build
+      - name: Check contract size
+        run: |
+          size=$(wc -c < target/wasm32v1-none/release/stellarsafe_treasury.wasm)
+          echo "wasm size: $size bytes"
+          test "$size" -le 131072
+      - name: Wasm tests (mainnet resource limits)
+        run: cargo test -p stellarsafe-treasury --features wasm-tests --test wasm
+      - name: Clippy with all features
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Wasm hash
+        run: sha256sum target/wasm32v1-none/release/stellarsafe_treasury.wasm | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stellarsafe_treasury.wasm
+          path: target/wasm32v1-none/release/stellarsafe_treasury.wasm
+
+  fuzz:
+    # Long model-based run: nightly, or on PRs labelled `fuzz`.
+    if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'fuzz')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release -p stellarsafe-treasury contract_matches_reference_model
+        env:
+          PROPTEST_CASES: "2000"
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
