@@ -24,5 +24,5 @@ In scope: everything under `contracts/`. Out of scope: issues that require a quo
 - [x] Model-based property tests of the proposal state machine (nightly in CI)
 - [x] Governance timelock with guardian veto
 - [x] Reproducible build: pinned toolchain, release workflow publishes the Wasm hash and build provenance
-- [ ] Public testnet deployment with demo transactions
-- [ ] CI green on GitHub with the official stellar-cli build
+- [x] Public testnet deployment with demo transactions ([docs/TESTNET.md](docs/TESTNET.md))
+- [x] CI green on GitHub with the official stellar-cli build
