@@ -14,6 +14,8 @@ StellarSafe lets an organization hold assets in a contract that **only pays out 
 There is **no admin key**. Adding members, changing policies, raising budgets and upgrading the contract all go through the same multi-approval process as payments.
 
 > **Status: testnet only.** This code has not had an external security audit. Do not hold real assets with it until it has. See [SECURITY.md](SECURITY.md).
+>
+> **Live on testnet:** a demo treasury with real payments, a timelocked governance change, a guardian veto and a pause. See [docs/TESTNET.md](docs/TESTNET.md).
 
 ---
 
@@ -213,6 +215,8 @@ SOURCE=alice ./scripts/deploy-testnet.sh init.json
 ```
 
 The script refuses to target mainnet.
+
+To run the full end-to-end demo (fresh accounts, test asset, payments, rejections, timelock, veto, pause), run `./scripts/testnet-demo.sh`, or let the **Testnet demo** workflow do it. Results are written to [docs/TESTNET.md](docs/TESTNET.md).
 
 ## Verifying a deployment
 

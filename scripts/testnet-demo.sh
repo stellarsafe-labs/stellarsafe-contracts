@@ -30,7 +30,9 @@ call() {
   local err; err=$(mktemp)
   if RESULT=$(stellar contract invoke --id "$id" --source "$P-$src" --network $NET --send yes "$@" 2>"$err"); then
     local hash shown
-    hash=$(grep -oE '[0-9a-f]{64}' "$err" | tail -1 || true)
+    # Last 64-hex string in the CLI log that isn't one of our own arguments
+    # (e.g. a wasm hash passed to Upgrade).
+    hash=$(grep -oE '[0-9a-f]{64}' "$err" | grep -vxF -f <(printf '%s\n' "$@" | grep -oE '[0-9a-f]{64}' || true) | tail -1 || true)
     shown=$RESULT; [[ "$shown" == "null" || -z "$shown" ]] && shown="ok"
     echo "  ok: $desc → $shown ${hash:+($hash)}" >&2
     rows+=("| $desc | $shown | [\`${hash:0:12}…\`]($EXPLORER/tx/$hash) |")
