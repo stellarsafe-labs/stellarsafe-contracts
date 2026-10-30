@@ -28,6 +28,8 @@ jobs:
         with:
           tool: stellar-cli@${{ env.STELLAR_CLI_VERSION }}
       - run: ./scripts/testnet-demo.sh
+        env:
+          DEMO_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
       - if: always()
         run: test -f docs/TESTNET.md && cat docs/TESTNET.md >> "$GITHUB_STEP_SUMMARY" || true
       - if: always()

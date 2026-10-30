@@ -171,7 +171,7 @@ BUDGET=$(stellar contract invoke --id "$TREASURY" --source "$P-alice" --network 
   echo "|---|---|"
   echo "| Treasury contract | [\`$TREASURY\`]($EXPLORER/contract/$TREASURY) |"
   echo "| Wasm SHA-256 (= on-chain wasm hash) | \`$WASM_HASH\` |"
-  echo "| Commit | \`${GITHUB_SHA:-$(git rev-parse HEAD)}\` |"
+  echo "| Commit | \`${DEMO_COMMIT:-$(git rev-parse HEAD)}\` |"
   echo "| Test token (SSUSD SAC) | [\`$TOKEN\`]($EXPLORER/contract/$TOKEN) |"
   echo "| Members | alice (proposer, approver, executor), bob (proposer, approver), carol (approver), guardian |"
   echo "| Policy | 1 approval below 500 SSUSD, 2 from 500; cap 10,000; dept 1 budget 5,000/month; allowlist on; ${DELAY}s governance timelock |"
