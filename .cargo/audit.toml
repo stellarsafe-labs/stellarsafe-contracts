@@ -1,0 +1,11 @@
+# cargo-audit configuration. Every ignored advisory needs a justification
+# and must be re-checked whenever soroban-sdk is upgraded.
+[advisories]
+ignore = [
+    # crypto-bigint 0.5.5: timing side channels in constant-time operations.
+    # Pulled in only by soroban-env-host (k256/p256), i.e. the native test
+    # host. It is NOT part of the deployed contract (absent from the
+    # wasm32v1-none dependency tree), and no secret-key arithmetic runs in
+    # our tests. The fix (>= 0.7.6) needs an upstream soroban-env-host bump.
+    "RUSTSEC-2026-0387",
+]
