@@ -1,0 +1,39 @@
+{
+  "members": {
+    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": 7,
+    "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB": 3,
+    "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC": 10
+  },
+  "governance_threshold": 2,
+  "governance_delay": 86400,
+  "max_proposal_ttl": 604800,
+  "allowlist_enabled": true,
+  "allowlist": [
+    "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  ],
+  "asset_policies": {
+    "CUSDC_CONTRACT_ID_PLACEHOLDER": {
+      "max_amount": "100000000000",
+      "tiers": [
+        {
+          "min_amount": "0",
+          "approvals": 1
+        },
+        {
+          "min_amount": "5000000000",
+          "approvals": 2
+        }
+      ]
+    }
+  },
+  "budgets": [
+    {
+      "department": 1,
+      "token": "CUSDC_CONTRACT_ID_PLACEHOLDER",
+      "budget": {
+        "limit": "50000000000",
+        "period": "CalendarMonth"
+      }
+    }
+  ]
+}
