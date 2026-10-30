@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a new policy, action or tooling improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What treasury use case is not covered today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include the storage, ABI and security implications if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      placeholder: "- [ ] ..."

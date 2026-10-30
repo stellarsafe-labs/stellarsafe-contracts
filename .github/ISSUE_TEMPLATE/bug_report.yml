@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in the contract or tooling behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerabilities must NOT be reported here.** Use a private security advisory instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the call, its arguments, and the error code or result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Ideally a failing test using the fixture in `contracts/treasury/src/test/setup.rs`.
+      render: rust
+  - type: input
+    id: version
+    attributes:
+      label: Commit or release
