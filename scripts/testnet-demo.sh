@@ -21,15 +21,20 @@ log() { printf '\n\033[1m== %s\033[0m\n' "$*" >&2; }
 addr() { stellar keys address "$P-$1"; }
 rows=()
 
-# Run a contract call, record its tx hash. Usage: call "<description>" <source> <contract> -- fn args...
+# Run a contract call and record its tx hash. The return value is left in
+# $RESULT (not printed) so the row survives: no subshell.
+# Usage: call "<description>" <source> <contract> -- fn args...
+RESULT=""
 call() {
   local desc=$1 src=$2 id=$3; shift 3
   local err; err=$(mktemp)
-  if out=$(stellar contract invoke --id "$id" --source "$P-$src" --network $NET --send yes "$@" 2>"$err"); then
-    local hash; hash=$(grep -oE '[0-9a-f]{64}' "$err" | tail -1 || true)
-    echo "  ok: $desc ${out:+→ $out} ${hash:+($hash)}" >&2
-    rows+=("| $desc | ${out:-} | [\`${hash:0:12}…\`]($EXPLORER/tx/$hash) |")
-    rm -f "$err"; printf '%s' "$out"
+  if RESULT=$(stellar contract invoke --id "$id" --source "$P-$src" --network $NET --send yes "$@" 2>"$err"); then
+    local hash shown
+    hash=$(grep -oE '[0-9a-f]{64}' "$err" | tail -1 || true)
+    shown=$RESULT; [[ "$shown" == "null" || -z "$shown" ]] && shown="ok"
+    echo "  ok: $desc → $shown ${hash:+($hash)}" >&2
+    rows+=("| $desc | $shown | [\`${hash:0:12}…\`]($EXPLORER/tx/$hash) |")
+    rm -f "$err"
   else
     cat "$err" >&2; rm -f "$err"; return 1
   fi
@@ -102,21 +107,23 @@ TREASURY=$(stellar contract deploy --wasm "$WASM" --source "$P-alice" --network 
 echo "  treasury: $TREASURY" >&2
 
 log "Fund treasury"
-call "Issuer mints 20,000 SSUSD to the treasury" issuer "$TOKEN" -- mint --to "$TREASURY" --amount "$((20000 * UNIT))" >/dev/null
+call "Issuer mints 20,000 SSUSD to the treasury" issuer "$TOKEN" -- mint --to "$TREASURY" --amount "$((20000 * UNIT))"
 
 log "Payment below 500: one approval"
-ID=$(call "Bob proposes 100 SSUSD to vendor (dept 1)" bob "$TREASURY" -- propose_payment \
-  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((100 * UNIT))" --department 1 --ttl 86400)
-call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID" >/dev/null
-call "Alice executes #$ID: 100 SSUSD paid" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID" >/dev/null
+call "Bob proposes 100 SSUSD to vendor (dept 1)" bob "$TREASURY" -- propose_payment \
+  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((100 * UNIT))" --department 1 --ttl 86400
+ID=$RESULT
+call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID"
+call "Alice executes #$ID: 100 SSUSD paid" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
 
 log "Payment of 750: two approvals"
-ID=$(call "Bob proposes 750 SSUSD to vendor" bob "$TREASURY" -- propose_payment \
-  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((750 * UNIT))" --department 1 --ttl 86400)
-call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID" >/dev/null
+call "Bob proposes 750 SSUSD to vendor" bob "$TREASURY" -- propose_payment \
+  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((750 * UNIT))" --department 1 --ttl 86400
+ID=$RESULT
+call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID"
 expect_err "Executing #$ID with 1 of 2 approvals" 305 alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
-call "Carol approves #$ID" carol "$TREASURY" -- approve --approver "$(addr carol)" --id "$ID" >/dev/null
-call "Alice executes #$ID: 750 SSUSD paid" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID" >/dev/null
+call "Carol approves #$ID" carol "$TREASURY" -- approve --approver "$(addr carol)" --id "$ID"
+call "Alice executes #$ID: 750 SSUSD paid" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
 
 log "Policy rejections"
 expect_err "Paying a recipient not on the allowlist" 403 bob "$TREASURY" -- propose_payment \
@@ -125,26 +132,29 @@ expect_err "Paying 5,001 SSUSD from a 5,000/month budget" 405 bob "$TREASURY" --
   --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((5001 * UNIT))" --department 1 --ttl 86400
 
 log "Timelocked governance: allowlist a new recipient"
-ID=$(call "Alice proposes SetRecipientAllowed(stranger, true)" alice "$TREASURY" -- propose \
-  --proposer "$(addr alice)" --action "{\"SetRecipientAllowed\":[\"$(addr stranger)\",true]}" --ttl 3600)
-call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID" >/dev/null
-call "Bob approves #$ID (threshold reached, timelock starts)" bob "$TREASURY" -- approve --approver "$(addr bob)" --id "$ID" >/dev/null
+call "Alice proposes SetRecipientAllowed(stranger, true)" alice "$TREASURY" -- propose \
+  --proposer "$(addr alice)" --action "{\"SetRecipientAllowed\":[\"$(addr stranger)\",true]}" --ttl 3600
+ID=$RESULT
+call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID"
+call "Bob approves #$ID (threshold reached, timelock starts)" bob "$TREASURY" -- approve --approver "$(addr bob)" --id "$ID"
 expect_err "Executing #$ID before the ${DELAY}s timelock ends" 307 alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
 echo "  waiting $((DELAY + 10))s for the timelock..." >&2; sleep $((DELAY + 10))
-call "Alice executes #$ID after the timelock" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID" >/dev/null
+call "Alice executes #$ID after the timelock" alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
 
 log "Guardian veto"
-ID=$(call "Alice proposes Upgrade(unknown wasm)" alice "$TREASURY" -- propose \
-  --proposer "$(addr alice)" --action "{\"Upgrade\":\"$(printf 'ab%.0s' {1..32})\"}" --ttl 3600)
-call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID" >/dev/null
-call "Bob approves #$ID" bob "$TREASURY" -- approve --approver "$(addr bob)" --id "$ID" >/dev/null
-call "Guardian vetoes #$ID during the timelock" guardian "$TREASURY" -- cancel --caller "$(addr guardian)" --id "$ID" >/dev/null
+call "Alice proposes Upgrade(unknown wasm)" alice "$TREASURY" -- propose \
+  --proposer "$(addr alice)" --action "{\"Upgrade\":\"$(printf 'ab%.0s' {1..32})\"}" --ttl 3600
+ID=$RESULT
+call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID"
+call "Bob approves #$ID" bob "$TREASURY" -- approve --approver "$(addr bob)" --id "$ID"
+call "Guardian vetoes #$ID during the timelock" guardian "$TREASURY" -- cancel --caller "$(addr guardian)" --id "$ID"
 
 log "Emergency pause"
-ID=$(call "Bob proposes 10 SSUSD to vendor" bob "$TREASURY" -- propose_payment \
-  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((10 * UNIT))" --department 1 --ttl 86400)
-call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID" >/dev/null
-call "Guardian pauses payments" guardian "$TREASURY" -- pause --guardian "$(addr guardian)" >/dev/null
+call "Bob proposes 10 SSUSD to vendor" bob "$TREASURY" -- propose_payment \
+  --proposer "$(addr bob)" --token "$TOKEN" --to "$(addr vendor)" --amount "$((10 * UNIT))" --department 1 --ttl 86400
+ID=$RESULT
+call "Alice approves #$ID" alice "$TREASURY" -- approve --approver "$(addr alice)" --id "$ID"
+call "Guardian pauses payments" guardian "$TREASURY" -- pause --guardian "$(addr guardian)"
 expect_err "Executing #$ID while paused" 406 alice "$TREASURY" -- execute --executor "$(addr alice)" --id "$ID"
 
 log "Final state"
@@ -161,7 +171,7 @@ BUDGET=$(stellar contract invoke --id "$TREASURY" --source "$P-alice" --network 
   echo "|---|---|"
   echo "| Treasury contract | [\`$TREASURY\`]($EXPLORER/contract/$TREASURY) |"
   echo "| Wasm SHA-256 (= on-chain wasm hash) | \`$WASM_HASH\` |"
-  echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
+  echo "| Commit | \`${GITHUB_SHA:-$(git rev-parse HEAD)}\` |"
   echo "| Test token (SSUSD SAC) | [\`$TOKEN\`]($EXPLORER/contract/$TOKEN) |"
   echo "| Members | alice (proposer, approver, executor), bob (proposer, approver), carol (approver), guardian |"
   echo "| Policy | 1 approval below 500 SSUSD, 2 from 500; cap 10,000; dept 1 budget 5,000/month; allowlist on; ${DELAY}s governance timelock |"
@@ -174,7 +184,7 @@ BUDGET=$(stellar contract invoke --id "$TREASURY" --source "$P-alice" --network 
   echo
   echo "## Final state"
   echo
-  echo "- Vendor balance: \`$VENDOR_BAL\` (850 SSUSD in base units)"
+  echo "- Vendor balance: \`$VENDOR_BAL\` (850 SSUSD; 7 decimals)"
   echo "- Treasury balance: \`$TREASURY_BAL\`"
   echo "- Department 1 budget: \`$BUDGET\`"
   echo
