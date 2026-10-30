@@ -1,0 +1,7 @@
+# Pinned so release builds are reproducible: the same commit, toolchain and
+# stellar-cli version always produce the same Wasm hash.
+[toolchain]
+channel = "1.99.1"
+targets = ["wasm32v1-none"]
+components = ["rustfmt", "clippy"]
+profile = "minimal"

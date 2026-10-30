@@ -1,0 +1,25 @@
+[package]
+name = "stellarsafe-treasury"
+description = "StellarSafe treasury: on-chain spending policies, multi-approval workflows and audited payments for Soroban"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+proptest = "1.12"
+
+[features]
+# Runs tests/wasm.rs against the compiled contract. Build the wasm first:
+#   stellar contract build && cargo test --features wasm-tests
+wasm-tests = []
