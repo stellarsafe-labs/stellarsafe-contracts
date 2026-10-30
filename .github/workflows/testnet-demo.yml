@@ -1,0 +1,38 @@
+name: Testnet demo
+
+# Deploys a fresh treasury to testnet and runs scripts/testnet-demo.sh.
+# The generated docs/TESTNET.md is uploaded as an artifact and shown in the
+# job summary. Run manually, or automatically when the demo changes.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/testnet-demo.sh
+      - .github/workflows/testnet-demo.yml
+
+permissions:
+  contents: read
+
+env:
+  STELLAR_CLI_VERSION: 28.1.0
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: stellar-cli@${{ env.STELLAR_CLI_VERSION }}
+      - run: ./scripts/testnet-demo.sh
+      - if: always()
+        run: test -f docs/TESTNET.md && cat docs/TESTNET.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-demo
+          path: docs/TESTNET.md
+          if-no-files-found: ignore

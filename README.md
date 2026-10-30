@@ -17,6 +17,24 @@ There is **no admin key**. Adding members, changing policies, raising budgets an
 
 ---
 
+## Why StellarSafe
+
+Soroban already has good building blocks for *who can sign*. Examples are [OpenZeppelin's smart-account policies](https://docs.openzeppelin.com/stellar-contracts/accounts/policies) (N-of-M and weighted thresholds, rolling ledger-based spending caps) and Stellar's [custom account example](https://developers.stellar.org/docs/build/smart-contracts/example-contracts/complex-account). Those check whether a transaction is signed correctly when it happens.
+
+StellarSafe works one level higher. It is a **treasury workflow engine**: payments are on-chain *proposals* that collect approvals over time and are checked against organisation-level rules when they execute.
+
+| | Signing-level policies (e.g. OZ smart accounts) | StellarSafe |
+|---|---|---|
+| Approvals | Signatures on a single transaction | On-chain proposals approved asynchronously, with expiry, revocation and an audit trail |
+| Spending limits | Rolling window measured in ledgers, per signing rule | Per **department** and token, by **UTC calendar month** (or fixed window); predictable for accounting |
+| Amount-based thresholds | Configure separate rules | Built-in approval tiers per asset (e.g. ≥ 500 USDC → 2 approvals) |
+| Recipient control | – | Allowlist, checked again at execution |
+| Rule changes | Thresholds can become unreachable when signers change; admins must fix them by hand | Invariants enforced on every change; affected approvals reset automatically |
+| Governance | Account admin | Self-governing quorum, **timelock** and guardian veto, emergency pause |
+| Off-chain integration | Generic | Typed events, `get_proposal_state` with the exact blocking error, metadata hashes for descriptions |
+
+The two fit together. A StellarSafe member can itself be a smart account (for example a passkey wallet), which gives hardware-grade signing *and* treasury-level policy.
+
 ## Contents
 
 - [How it works](#how-it-works)

@@ -30,6 +30,17 @@ make check                           # lint, tests, wasm build, wasm tests, size
 
 Each issue should state its acceptance criteria and the tests it needs.
 
+## Contributing through Drips Wave
+
+This repository is built to take part in the [Stellar Drips Wave](https://www.drips.network/wave/stellar). If you are joining through a Wave:
+
+1. **Claim before coding.** Comment on the issue, or apply in the Wave app, and wait to be assigned. Unassigned PRs may be closed.
+2. **One issue per PR.** Reference it with `Closes #N`.
+3. **Meet every acceptance-criteria checkbox** in the issue, and say in the PR how each one is met.
+4. **Understand what you submit.** AI tools are fine, but you must be able to explain every line. Untested or not-understood generated code will be closed (see the Wave Terms & Rules).
+5. **Security-sensitive changes** (anything in `lib.rs` that touches auth, execution or accounting) need a test that fails without your change.
+6. Expect review within a few days. Address comments with new commits, not force-pushes, so the review history stays readable.
+
 ## Commit style
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `test:`, `docs:`) and keep each commit focused on one change.
