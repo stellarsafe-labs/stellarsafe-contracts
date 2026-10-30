@@ -1,0 +1,51 @@
+name: Release
+
+# Push a tag like `v0.2.0` to publish a reproducible build. The release lists
+# the Wasm's SHA-256, which equals the on-chain Wasm hash, so anyone can check
+# that a deployed treasury runs exactly this code (see docs/VERIFYING.md).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  STELLAR_CLI_VERSION: 28.1.0
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: stellar-cli@${{ env.STELLAR_CLI_VERSION }}
+      - name: Test
+        run: cargo test --workspace
+      - name: Build
+        run: stellar contract build
+      - name: Wasm tests
+        run: cargo test -p stellarsafe-treasury --features wasm-tests --test wasm
+      - name: Checksums
+        run: |
+          mkdir dist
+          cp target/wasm32v1-none/release/stellarsafe_treasury.wasm dist/
+          cd dist
+          sha256sum stellarsafe_treasury.wasm > SHA256SUMS
+          {
+            echo "rustc: $(rustc --version)"
+            echo "stellar-cli: $(stellar --version | head -1)"
+            echo "commit: $GITHUB_SHA"
+          } > BUILD_INFO
+          cat SHA256SUMS BUILD_INFO
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/stellarsafe_treasury.wasm
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
