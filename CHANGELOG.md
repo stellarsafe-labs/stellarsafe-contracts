@@ -24,5 +24,7 @@
 - Native and Wasm test suites; CI; testnet deploy script; threat model.
 
 ### Changed
+- Testnet demo funds the treasury through `deposit()` as well as a mint.
+- `docs/UPGRADING.md`: storage versions, layout-change rules and the upgrade procedure. CONTRIBUTING: issue labels, Drips Wave workflow and PR checklist.
 - Split contract internals out of `lib.rs` into `proposals`, `payments`, `governance` and `migration` modules. No behavior change.
 - Threat model: documents the rogue-guardian re-pause outage and its bound.

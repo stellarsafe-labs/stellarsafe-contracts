@@ -46,7 +46,7 @@ The two fit together. A StellarSafe member can itself be a smart account (for ex
 - [Building and testing](#building-and-testing)
 - [Deploying to testnet](#deploying-to-testnet)
 - [Repository layout](#repository-layout)
-- Further docs: [Threat model](docs/THREAT_MODEL.md) · [Integration guide (SDK / indexer / frontend)](docs/INTEGRATION.md) · [Contributing](CONTRIBUTING.md)
+- Further docs: [Threat model](docs/THREAT_MODEL.md) · [Upgrading](docs/UPGRADING.md) · [Integration guide (SDK / indexer / frontend)](docs/INTEGRATION.md) · [Contributing](CONTRIBUTING.md)
 
 ## How it works
 
@@ -236,7 +236,7 @@ NETWORK=mainnet ./scripts/upgrade-rehearsal.sh C...CONTRACT_ID
 
 This snapshots the contract's current on-chain state and upgrades the snapshot to this checkout through a normal governance flow. It then runs `migrate()` and checks that config, members, policies and every proposal survived, that writes work again, and that both the upgrade and the migration fit within mainnet instruction limits. Nothing is sent to the network. CI runs it nightly against the testnet demo treasury, and on PRs labelled `upgrade`.
 
-After the upgrade executes on-chain, call `migrate()` immediately.
+After the upgrade executes on-chain, call `migrate()` immediately. The full procedure is in [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ## Verifying a deployment
 

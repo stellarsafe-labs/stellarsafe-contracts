@@ -116,4 +116,4 @@ Open proposals can't be archived: their TTL (at most 90 days) is shorter than th
 
 ### Upgrades and migrations
 
-`storage_version()` reports the layout of the stored data. If an upgrade raises it, every write call fails with `MigrationRequired` (600) until someone calls `migrate()`. Whoever executes an `Upgrade` should call `migrate()` straight away; clients that see error 600 can call it themselves. Views keep working throughout. Rehearse every upgrade first with `scripts/upgrade-rehearsal.sh` (see the README).
+`storage_version()` reports the layout of the stored data. If an upgrade raises it, every write call fails with `MigrationRequired` (600) until someone calls `migrate()`. Whoever executes an `Upgrade` should call `migrate()` straight away; clients that see error 600 can call it themselves. Views keep working throughout. Rehearse every upgrade first with `scripts/upgrade-rehearsal.sh`. The full procedure is in [UPGRADING.md](UPGRADING.md).
