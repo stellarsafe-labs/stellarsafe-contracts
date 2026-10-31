@@ -1,4 +1,4 @@
-.PHONY: all build test test-wasm lint fmt check clean size fuzz
+.PHONY: all build test test-wasm lint fmt check clean size fuzz rehearse
 
 WASM := target/wasm32v1-none/release/stellarsafe_treasury.wasm
 MAX_WASM_BYTES := 131072
@@ -33,6 +33,10 @@ check: lint test test-wasm size
 
 clean:
 	cargo clean
+
+## Rehearse upgrading a live treasury: make rehearse CONTRACT=C... [NETWORK=mainnet]
+rehearse:
+	./scripts/upgrade-rehearsal.sh $(CONTRACT)
 
 ## Long model-based fuzz run.
 fuzz:

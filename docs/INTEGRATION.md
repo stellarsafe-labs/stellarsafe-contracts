@@ -27,7 +27,7 @@ The contract spec embedded in the Wasm describes every function, type, error and
   blocked_by?: number }      // error code `execute` would hit, if any
 ```
 
-For governance proposals, `blocked_by` does not cover the invariant checks. Simulate `execute` for a definitive answer.
+For governance proposals, `blocked_by` does not cover the invariant checks. It also can't apply the independent-executor rule, which depends on who executes. Simulate `execute` for a definitive answer. A pending governance proposal reports `TimelockOutlivesProposal` (310) once it is too late to collect approvals, because the timelock would end after the proposal expires.
 
 **Metadata.** Store the proposal description off-chain, hash it with SHA-256, and pass the hash as `metadata_hash`. The UI can then prove the description shown matches what approvers signed.
 
@@ -81,6 +81,7 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 | 110 | `NotConfigured` | Removing a policy or budget that does not exist |
 | 111 | `InvalidMember` | The treasury cannot be its own member |
 | 112 | `InvalidDelay` | Governance delay > 30 days, or not shorter than `max_proposal_ttl` |
+| 113 | `NoIndependentExecutor` | Independent execution on, but no executor could run every proposal without approving it |
 | 200 | `Unauthorized` | Caller lacks the required role |
 | 300 | `ProposalNotFound` | |
 | 301 | `ProposalNotPending` | Already executed or cancelled |
@@ -91,6 +92,8 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 | 306 | `InvalidPagination` | `limit` must be between 1 and 50 |
 | 307 | `TimelockActive` | Governance proposal approved, but `ready_at` not reached |
 | 308 | `ProposalNotPrunable` | Still open, or closed less than 30 days ago |
+| 309 | `ExecutorApproved` | Independent execution on and the caller's approval counts: another executor must run it |
+| 310 | `TimelockOutlivesProposal` | Reaching the threshold now would start a timelock that ends at or after expiry. Re-propose with a longer TTL |
 | 400 | `InvalidAmount` | Must be > 0 |
 | 401 | `AssetNotAllowed` | Token has no policy |
 | 402 | `AmountExceedsCap` | Above the asset's `max_amount` |
@@ -113,4 +116,4 @@ Open proposals can't be archived: their TTL (at most 90 days) is shorter than th
 
 ### Upgrades and migrations
 
-`storage_version()` reports the layout of the stored data. If an upgrade raises it, every write call fails with `MigrationRequired` (600) until someone calls `migrate()`. Whoever executes an `Upgrade` should call `migrate()` straight away; clients that see error 600 can call it themselves. Views keep working throughout.
+`storage_version()` reports the layout of the stored data. If an upgrade raises it, every write call fails with `MigrationRequired` (600) until someone calls `migrate()`. Whoever executes an `Upgrade` should call `migrate()` straight away; clients that see error 600 can call it themselves. Views keep working throughout. Rehearse every upgrade first with `scripts/upgrade-rehearsal.sh` (see the README).

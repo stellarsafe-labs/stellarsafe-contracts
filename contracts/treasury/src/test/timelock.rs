@@ -217,3 +217,48 @@ fn constructor_rejects_delay_not_below_ttl_cap() {
     init.governance_delay = init.max_proposal_ttl;
     f.env.register(Treasury, (init,));
 }
+
+#[test]
+fn approval_that_would_start_a_too_late_timelock_is_rejected() {
+    let f = timelocked();
+    let ttl = 3 * DAY;
+    let id = f.client.propose(&f.alice, &Action::Unpause, &ttl, &None);
+    let expires_at = f.client.get_proposal(&id).expires_at;
+    f.client.approve(&f.alice, &id);
+
+    // At this moment the timelock would end exactly at expiry: too late.
+    f.set_time(expires_at - DELAY);
+    let blocked = Some(Error::TimelockOutlivesProposal as u32);
+    assert_eq!(f.client.get_proposal_state(&id).blocked_by, blocked);
+    assert_contract_err!(
+        f.client.try_approve(&f.bob, &id),
+        Error::TimelockOutlivesProposal
+    );
+    assert_eq!(f.client.get_proposal(&id).ready_at, None);
+
+    // One second earlier it still fits.
+    f.set_time(expires_at - DELAY - 1);
+    let state = f.client.get_proposal_state(&id);
+    assert_eq!(state.blocked_by, Some(Error::InsufficientApprovals as u32));
+    f.client.approve(&f.bob, &id);
+    assert_eq!(f.client.get_proposal(&id).ready_at, Some(expires_at - 1));
+    f.set_time(expires_at - 1);
+    f.client.execute(&f.dave, &id);
+}
+
+#[test]
+fn restarted_timelock_must_also_fit_before_expiry() {
+    let f = timelocked();
+    let id = f
+        .client
+        .propose(&f.alice, &Action::Unpause, &(3 * DAY), &None);
+    let expires_at = f.client.get_proposal(&id).expires_at;
+    f.approve_by(id, &[&f.alice, &f.bob]);
+    // Dropping below the threshold and coming back restarts the clock.
+    f.set_time(expires_at - DELAY);
+    f.client.revoke_approval(&f.bob, &id);
+    assert_contract_err!(
+        f.client.try_approve(&f.bob, &id),
+        Error::TimelockOutlivesProposal
+    );
+}

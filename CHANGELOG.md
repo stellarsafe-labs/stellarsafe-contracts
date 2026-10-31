@@ -4,6 +4,9 @@
 
 ### Added
 - `prune_proposals(ids)`: anyone can delete proposals closed for at least 30 days (`PROPOSAL_RETENTION`); `proposal_pruned` event; error `ProposalNotPrunable` (308).
+- Optional independent execution (`SetIndependentExecutor`, view `independent_executor`): nobody can execute a proposal their own approval counts on. Errors `NoIndependentExecutor` (113) and `ExecutorApproved` (309).
+- Approvals that would start a governance timelock ending at or after expiry are rejected; `get_proposal_state` reports it. Error `TimelockOutlivesProposal` (310).
+- Upgrade rehearsal: `scripts/upgrade-rehearsal.sh` / `make rehearse` upgrades and migrates a snapshot of a live treasury under mainnet limits; nightly CI job against testnet.
 - Storage layout versioning: `storage_version()`, permissionless `migrate()`, `storage_migrated` event, errors `MigrationRequired` (600) and `UnsupportedStorageVersion` (601). Writes are refused until stored data matches the code's layout.
 - Treasury contract with roles (proposer, approver, executor, guardian) and self-governance; no admin key.
 - Per-asset policies: per-payment cap and amount-based approval tiers (fail-closed).

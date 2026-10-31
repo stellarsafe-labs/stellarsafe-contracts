@@ -131,6 +131,9 @@ pub enum Action {
     /// Timelock in seconds between reaching the governance threshold and
     /// being able to execute. Changing it is itself subject to the current delay.
     SetGovernanceDelay(u64),
+    /// When on, a proposal cannot be executed by a member whose approval
+    /// counts on it, so no single key can both approve and execute.
+    SetIndependentExecutor(bool),
 }
 
 #[contracttype]

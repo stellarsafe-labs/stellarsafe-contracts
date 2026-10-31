@@ -85,6 +85,19 @@ pub fn count_valid_approvals(proposal: &Proposal, members: &Map<Address, u32>, e
     count
 }
 
+/// True if `who` holds an approval on `proposal` that currently counts.
+pub fn counts_approval(
+    proposal: &Proposal,
+    members: &Map<Address, u32>,
+    who: &Address,
+    epoch: u32,
+) -> bool {
+    proposal.approvals.get(who.clone()) == Some(epoch)
+        && members
+            .get(who.clone())
+            .is_some_and(|roles| roles & ROLE_APPROVER != 0)
+}
+
 /// A proposal can be pruned once it has been closed for `PROPOSAL_RETENTION`:
 /// executed or cancelled (counted from `closed_at`), or expired while still
 /// pending (counted from `expires_at`). Closed proposals can never change

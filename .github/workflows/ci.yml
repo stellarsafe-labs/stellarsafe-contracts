@@ -76,6 +76,23 @@ jobs:
         env:
           PROPTEST_CASES: "2000"
 
+  upgrade-rehearsal:
+    # Upgrades a snapshot of the testnet demo treasury to this commit and
+    # migrates it: nightly, or on PRs labelled `upgrade`.
+    if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'upgrade')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: stellar-cli@${{ env.STELLAR_CLI_VERSION }}
+      - name: Rehearse upgrade of the testnet demo treasury
+        run: |
+          contract=$(grep -m1 -oE 'C[A-Z2-7]{55}' docs/TESTNET.md)
+          ./scripts/upgrade-rehearsal.sh "$contract"
+
   audit:
     runs-on: ubuntu-latest
     steps:

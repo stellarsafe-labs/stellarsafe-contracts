@@ -23,3 +23,6 @@ proptest = "1.12"
 # Runs tests/wasm.rs against the compiled contract. Build the wasm first:
 #   stellar contract build && cargo test --features wasm-tests
 wasm-tests = []
+# Runs tests/upgrade_rehearsal.rs: upgrade + migrate against a snapshot of a
+# live treasury. Use scripts/upgrade-rehearsal.sh.
+upgrade-rehearsal = []

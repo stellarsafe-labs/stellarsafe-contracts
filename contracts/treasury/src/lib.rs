@@ -47,8 +47,8 @@ use crate::migration::enter;
 use crate::payments::payment_plan;
 use crate::policy::{validate_budget, window_id};
 use crate::proposals::{
-    approval_epoch, check_timelock, count_valid_approvals, ensure_open, ensure_prunable,
-    is_payment, load_proposal, require_role, targets_guardian,
+    approval_epoch, check_timelock, count_valid_approvals, counts_approval, ensure_open,
+    ensure_prunable, is_payment, load_proposal, require_role, targets_guardian,
 };
 use crate::storage as st;
 
@@ -206,6 +206,10 @@ impl Treasury {
                 .timestamp()
                 .checked_add(config.governance_delay)
                 .ok_or(Error::Overflow)?;
+            // Execution needs `ready_at <= now < expires_at`.
+            if ready_at >= proposal.expires_at {
+                return Err(Error::TimelockOutlivesProposal);
+            }
             proposal.ready_at = Some(ready_at);
             proposal.ready_epoch = epoch;
             ready = Some(ready_at);
@@ -285,6 +289,11 @@ impl Treasury {
         let mut config = st::get_config(&env);
         let epoch = approval_epoch(&env, &proposal, &config);
         let approvals = count_valid_approvals(&proposal, &members, epoch);
+        if st::get_independent_executor(&env)
+            && counts_approval(&proposal, &members, &executor, epoch)
+        {
+            return Err(Error::ExecutorApproved);
+        }
 
         // Effects before interactions: mark executed first so the proposal
         // can never run twice, even if the token contract misbehaves.
@@ -437,6 +446,12 @@ impl Treasury {
         String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 
+    /// True if a proposal cannot be executed by a member whose approval
+    /// counts on it (`Action::SetIndependentExecutor`).
+    pub fn independent_executor(env: Env) -> bool {
+        st::get_independent_executor(&env)
+    }
+
     /// Layout version of the stored data. If it is lower than the code's
     /// `STORAGE_VERSION`, call `migrate` before anything else.
     pub fn storage_version(env: Env) -> u32 {
@@ -516,8 +531,9 @@ impl Treasury {
 
     /// Live status of a proposal under the current config: how many
     /// approvals count, how many are needed, and what (if anything) would
-    /// make `execute` fail right now. Governance invariants are only checked
-    /// by `execute` itself; simulate it for a definitive answer.
+    /// make `execute` fail right now. Governance invariants and the
+    /// independent-executor rule (which depends on who executes) are only
+    /// checked by `execute` itself; simulate it for a definitive answer.
     pub fn get_proposal_state(env: Env, id: u64) -> Result<ProposalState, Error> {
         let proposal = load_proposal(&env, id)?;
         let config = st::get_config(&env);
@@ -544,7 +560,19 @@ impl Treasury {
             _ => (0, Some(Error::ProposalNotPending as u32)),
         };
         if blocked_by.is_none() && approvals < required {
-            blocked_by = Some(Error::InsufficientApprovals as u32);
+            // A governance proposal that would reach its threshold now could
+            // still never run if the timelock outlasts it.
+            let too_late = !is_payment(&proposal.action)
+                && env
+                    .ledger()
+                    .timestamp()
+                    .saturating_add(config.governance_delay)
+                    >= proposal.expires_at;
+            blocked_by = Some(if too_late {
+                Error::TimelockOutlivesProposal
+            } else {
+                Error::InsufficientApprovals
+            } as u32);
         }
         if blocked_by.is_none() && !is_payment(&proposal.action) {
             blocked_by = check_timelock(&env, &proposal, epoch)

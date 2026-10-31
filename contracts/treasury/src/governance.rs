@@ -137,6 +137,7 @@ pub fn apply_governance(
             .deployer()
             .update_current_contract(ContractExecutable::Wasm(wasm_hash.clone())),
         Action::SetGovernanceDelay(delay) => config.governance_delay = *delay,
+        Action::SetIndependentExecutor(on) => st::set_independent_executor(env, *on),
     }
     Ok(())
 }
@@ -154,10 +155,12 @@ pub fn check_invariants(
         return Err(Error::InvalidMemberCount);
     }
     let (mut proposers, mut approvers, mut executors) = (0u32, 0u32, 0u32);
+    let mut executor_only = false;
     for (_, roles) in members.iter() {
         proposers += (roles & ROLE_PROPOSER != 0) as u32;
         approvers += (roles & ROLE_APPROVER != 0) as u32;
         executors += (roles & ROLE_EXECUTOR != 0) as u32;
+        executor_only |= roles & ROLE_EXECUTOR != 0 && roles & ROLE_APPROVER == 0;
     }
     if proposers == 0 || approvers == 0 || executors == 0 {
         return Err(Error::MissingRequiredRole);
@@ -173,10 +176,25 @@ pub fn check_invariants(
     if assets.len() > MAX_ASSETS {
         return Err(Error::TooManyAssets);
     }
+    let mut most_approvals = config.governance_threshold;
     for token in assets.iter() {
         let policy = st::get_asset_policy(env, &token).ok_or(Error::InvalidPolicy)?;
-        if max_tier_approvals(&policy) > approvers {
+        let tier_max = max_tier_approvals(&policy);
+        if tier_max > approvers {
             return Err(Error::InvalidThreshold);
+        }
+        most_approvals = most_approvals.max(tier_max);
+    }
+    // With independent execution, some executor must be able to run every
+    // proposal without being one of the approvers it needs.
+    if st::get_independent_executor(env) {
+        let available = if executor_only {
+            approvers
+        } else {
+            approvers - 1
+        };
+        if most_approvals > available {
+            return Err(Error::NoIndependentExecutor);
         }
     }
     Ok(())

@@ -72,6 +72,7 @@ Everything is a **proposal** carrying an `Action`:
 | `Unpause`                                 | `governance_threshold`            |
 | `Upgrade(wasm_hash)`                      | `governance_threshold`            |
 | `SetGovernanceDelay(seconds)`             | `governance_threshold`            |
+| `SetIndependentExecutor(bool)`            | `governance_threshold`            |
 
 Everything except payments is a **governance action**. Governance actions are timelocked (see below).
 
@@ -177,7 +178,7 @@ How the functions in the original spec map to this contract:
 
 ### Reads
 
-`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`, `storage_version`. Pruned proposals return `ProposalNotFound` and are skipped by `get_proposals`.
+`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`, `storage_version`, `independent_executor`. Pruned proposals return `ProposalNotFound` and are skipped by `get_proposals`.
 
 Error codes are listed in [`errors.rs`](contracts/treasury/src/errors.rs) and in the [integration guide](docs/INTEGRATION.md#error-codes).
 
@@ -186,12 +187,13 @@ Error codes are listed in [`errors.rs`](contracts/treasury/src/errors.rs) and in
 Prerequisites: Rust stable with the `wasm32v1-none` target, and [stellar-cli](https://developers.stellar.org/docs/tools/cli) v25.2 or newer. soroban-sdk 29 refuses plain `cargo build` for Wasm.
 
 ```sh
-make test        # 120 native tests, incl. the model-based fuzz test
+make test        # 129 native tests, incl. the model-based fuzz test
 make build       # stellar contract build -> target/wasm32v1-none/release/stellarsafe_treasury.wasm
 make test-wasm   # tests against the compiled Wasm, metered against mainnet limits
 make lint        # rustfmt + clippy -D warnings
 make check       # everything above + Wasm size check (<= 128 KiB)
 make fuzz        # long model-based run (PROPTEST_CASES=2000)
+make rehearse CONTRACT=C...   # upgrade + migrate a snapshot of a live treasury (see below)
 ```
 
 What the tests cover:
@@ -203,6 +205,7 @@ What the tests cover:
 | Timelock | delay boundary to the second, timer restarts when approvals drop below threshold or the epoch changes, changing the delay is itself delayed, guardian veto and its limits, TTL must outlive the delay |
 | Budgets | accumulation, check at execution time not proposal time, exact UTC month and year rollover, daily windows, per-department isolation, remove/re-add keeps spend |
 | Governance | each action, threshold bounds, invariant violations rejected, failed execution reverts fully, upgrade |
+| Independent execution | off by default, applies to payments and governance, stale/revoked approvals don't block, invariant keeps an eligible executor |
 | Maintenance | pruning retention boundary (executed, cancelled, expired), all-or-nothing batches, pruned ids rejected and never reused, writes blocked until `migrate`, downgrade doesn't brick governance |
 | Security | double execution, closed proposals immutable, role checks on every entry point, signature impersonation, calls without auth, pause semantics, guardian limits, tier bypass via policy change |
 | Limits | 50 members × 20 assets × 48 approvals within mainnet limits. On Wasm, executing with 50 approvals costs about 2.3M instructions (limit 100M) |
@@ -210,6 +213,8 @@ What the tests cover:
 | Model-based fuzzing | random sequences of propose / approve / revoke / cancel / execute / prune / pause / unpause / policy changes / time jumps (including exact expiry, window and prune-retention edges, and exact-remaining-budget payments) checked step by step against a reference model: exact result or error code, balances, budget counters, proposal statuses. Validated by mutation: 8 of 8 deliberately introduced rule bugs are caught |
 
 ## Deploying to testnet
+
+**Role separation.** By default one member may approve *and* execute the same proposal. Combined with a 1-approval tier, a single key can then move funds up to the budget. For real funds, either don't give anyone both `APPROVER` and `EXECUTOR`, or turn on `SetIndependentExecutor(true)`: then nobody can execute a proposal their own approval counts on. Governance refuses to turn it on (or to remove members later) unless some executor can still run every proposal without being one of the approvers it needs.
 
 ```sh
 stellar keys generate alice --network testnet --fund
@@ -220,6 +225,18 @@ SOURCE=alice ./scripts/deploy-testnet.sh init.json
 The script refuses to target mainnet.
 
 To run the full end-to-end demo (fresh accounts, test asset, payments, rejections, timelock, veto, pause), run `./scripts/testnet-demo.sh`, or let the **Testnet demo** workflow do it. Results are written to [docs/TESTNET.md](docs/TESTNET.md).
+
+## Upgrading a deployment
+
+Before proposing an `Upgrade`, rehearse it against the live treasury:
+
+```sh
+NETWORK=mainnet ./scripts/upgrade-rehearsal.sh C...CONTRACT_ID
+```
+
+This snapshots the contract's current on-chain state and upgrades the snapshot to this checkout through a normal governance flow. It then runs `migrate()` and checks that config, members, policies and every proposal survived, that writes work again, and that both the upgrade and the migration fit within mainnet instruction limits. Nothing is sent to the network. CI runs it nightly against the testnet demo treasury, and on PRs labelled `upgrade`.
+
+After the upgrade executes on-chain, call `migrate()` immediately.
 
 ## Verifying a deployment
 

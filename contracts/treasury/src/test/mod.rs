@@ -15,6 +15,7 @@
 mod approvals;
 mod budgets;
 mod governance;
+mod independence;
 mod init;
 mod maintenance;
 mod model;

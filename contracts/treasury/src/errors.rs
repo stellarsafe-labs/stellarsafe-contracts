@@ -35,6 +35,9 @@ pub enum Error {
     /// Governance delay is above `MAX_GOVERNANCE_DELAY` or not shorter than
     /// `max_proposal_ttl` (proposals would expire before they could run).
     InvalidDelay = 112,
+    /// With independent execution on, every executor would be needed as an
+    /// approver to reach the governance threshold or an approval tier.
+    NoIndependentExecutor = 113,
 
     // ----- authorization (2xx) -----
     /// Caller is not a member or lacks the role needed for this call.
@@ -56,6 +59,12 @@ pub enum Error {
     TimelockActive = 307,
     /// Proposal is still open, or closed less than `PROPOSAL_RETENTION` ago.
     ProposalNotPrunable = 308,
+    /// Independent execution is on and the executor's own approval counts
+    /// on this proposal. Another executor must run it.
+    ExecutorApproved = 309,
+    /// The governance timelock would end at or after the proposal expires,
+    /// so the proposal could never execute. Propose it again with a longer TTL.
+    TimelockOutlivesProposal = 310,
 
     // ----- payments (4xx) -----
     InvalidAmount = 400,

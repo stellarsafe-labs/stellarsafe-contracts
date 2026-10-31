@@ -35,6 +35,7 @@ pub enum DataKey {
     AssetEpoch(Address),
     // instance (added in storage version 1; append new keys at the end)
     StorageVersion,
+    IndependentExecutor,
 }
 
 pub fn bump_instance(env: &Env) {
@@ -214,4 +215,20 @@ pub fn set_storage_version(env: &Env, version: u32) {
     env.storage()
         .instance()
         .set(&DataKey::StorageVersion, &version);
+}
+
+// ----- independent execution -----
+
+/// Stored apart from `Config` so turning it on needs no storage migration.
+pub fn get_independent_executor(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::IndependentExecutor)
+        .unwrap_or(false)
+}
+
+pub fn set_independent_executor(env: &Env, on: bool) {
+    env.storage()
+        .instance()
+        .set(&DataKey::IndependentExecutor, &on);
 }
