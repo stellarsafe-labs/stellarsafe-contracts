@@ -54,6 +54,8 @@ pub enum Error {
     InvalidPagination = 306,
     /// Governance proposal is approved but its timelock has not ended.
     TimelockActive = 307,
+    /// Proposal is still open, or closed less than `PROPOSAL_RETENTION` ago.
+    ProposalNotPrunable = 308,
 
     // ----- payments (4xx) -----
     InvalidAmount = 400,
@@ -74,4 +76,12 @@ pub enum Error {
 
     // ----- arithmetic (5xx) -----
     Overflow = 500,
+
+    // ----- storage layout (6xx) -----
+    /// The contract was upgraded and its storage has not been migrated yet.
+    /// Anyone can call `migrate` to fix this.
+    MigrationRequired = 600,
+    /// Stored data uses a newer layout than this code understands (the
+    /// contract was downgraded), so it cannot be migrated.
+    UnsupportedStorageVersion = 601,
 }

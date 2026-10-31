@@ -102,3 +102,19 @@ pub struct Deposited {
     pub from: Address,
     pub amount: i128,
 }
+
+/// A closed proposal was deleted from storage. Its history stays in events.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalPruned {
+    #[topic]
+    pub id: u64,
+}
+
+/// Stored data was converted to a new layout after an upgrade.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageMigrated {
+    pub from: u32,
+    pub to: u32,
+}

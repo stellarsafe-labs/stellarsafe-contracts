@@ -172,10 +172,12 @@ How the functions in the original spec map to this contract:
 | `execute(executor, id)` | executor | Re-checks everything; governance also needs `now >= ready_at`. The only path out of the treasury |
 | `pause(guardian)` | guardian | Blocks payment execution |
 | `deposit(from, token, amount)` | from | Optional; plain transfers to the contract address work too |
+| `prune_proposals(ids) -> u32` | anyone | Deletes 1–50 proposals that were executed, cancelled or expired at least 30 days ago. All or nothing. Ids are never reused; events keep the history |
+| `migrate() -> u32` | anyone | After an upgrade that changes the storage layout, converts stored data. Until then every write fails with `MigrationRequired`. Does nothing if storage is current |
 
 ### Reads
 
-`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`.
+`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`, `storage_version`. Pruned proposals return `ProposalNotFound` and are skipped by `get_proposals`.
 
 Error codes are listed in [`errors.rs`](contracts/treasury/src/errors.rs) and in the [integration guide](docs/INTEGRATION.md#error-codes).
 
@@ -184,7 +186,7 @@ Error codes are listed in [`errors.rs`](contracts/treasury/src/errors.rs) and in
 Prerequisites: Rust stable with the `wasm32v1-none` target, and [stellar-cli](https://developers.stellar.org/docs/tools/cli) v25.2 or newer. soroban-sdk 29 refuses plain `cargo build` for Wasm.
 
 ```sh
-make test        # 110 native tests, incl. the model-based fuzz test
+make test        # 120 native tests, incl. the model-based fuzz test
 make build       # stellar contract build -> target/wasm32v1-none/release/stellarsafe_treasury.wasm
 make test-wasm   # tests against the compiled Wasm, metered against mainnet limits
 make lint        # rustfmt + clippy -D warnings
@@ -201,10 +203,11 @@ What the tests cover:
 | Timelock | delay boundary to the second, timer restarts when approvals drop below threshold or the epoch changes, changing the delay is itself delayed, guardian veto and its limits, TTL must outlive the delay |
 | Budgets | accumulation, check at execution time not proposal time, exact UTC month and year rollover, daily windows, per-department isolation, remove/re-add keeps spend |
 | Governance | each action, threshold bounds, invariant violations rejected, failed execution reverts fully, upgrade |
+| Maintenance | pruning retention boundary (executed, cancelled, expired), all-or-nothing batches, pruned ids rejected and never reused, writes blocked until `migrate`, downgrade doesn't brick governance |
 | Security | double execution, closed proposals immutable, role checks on every entry point, signature impersonation, calls without auth, pause semantics, guardian limits, tier bypass via policy change |
 | Limits | 50 members × 20 assets × 48 approvals within mainnet limits. On Wasm, executing with 50 approvals costs about 2.3M instructions (limit 100M) |
 | Date math | calendar conversion checked day by day across 300 years |
-| Model-based fuzzing | random sequences of propose / approve / revoke / cancel / execute / pause / unpause / policy changes / time jumps (including exact expiry and window edges, and exact-remaining-budget payments) checked step by step against a reference model: exact result or error code, balances, budget counters, proposal statuses. Validated by mutation: 8 of 8 deliberately introduced rule bugs are caught |
+| Model-based fuzzing | random sequences of propose / approve / revoke / cancel / execute / prune / pause / unpause / policy changes / time jumps (including exact expiry, window and prune-retention edges, and exact-remaining-budget payments) checked step by step against a reference model: exact result or error code, balances, budget counters, proposal statuses. Validated by mutation: 8 of 8 deliberately introduced rule bugs are caught |
 
 ## Deploying to testnet
 
@@ -230,7 +233,11 @@ NETWORK=testnet ./scripts/verify-build.sh C...CONTRACT_ID
 
 ```
 contracts/treasury/
-  src/lib.rs        entry points, execution and governance logic, invariants
+  src/lib.rs        entry points
+  src/proposals.rs  proposal lifecycle: roles, approval epochs, timelock, pruning rules
+  src/payments.rs   payment checks: asset policy, allowlist, budget window, pause
+  src/governance.rs governance actions, validation and lock-out invariants
+  src/migration.rs  storage layout version and post-upgrade migration
   src/types.rs      public types (Action, AssetPolicy, Budget, Proposal, …) and limits
   src/policy.rs     pure policy math: tier lookup, validation, UTC calendar windows
   src/storage.rs    storage layout and TTL management

@@ -1,8 +1,8 @@
 //! Storage layout and TTL management.
 //!
 //! * Instance storage (lives and dies with the contract instance): config,
-//!   member set, list of assets with a policy, proposal counter. All of these
-//!   are bounded (see `MAX_MEMBERS`, `MAX_ASSETS`).
+//!   member set, list of assets with a policy, proposal counter, storage
+//!   layout version. All of these are bounded (see `MAX_MEMBERS`, `MAX_ASSETS`).
 //! * Persistent storage: asset policies, budgets, spend counters, allowlist
 //!   entries and proposals. Persistent entries are archived (not deleted) when
 //!   their TTL runs out and can be restored, so spend counters can never be
@@ -10,7 +10,7 @@
 
 use soroban_sdk::{contracttype, Address, Env, Map, Vec};
 
-use crate::types::{AssetPolicy, Budget, BudgetUsage, Config, Proposal};
+use crate::types::{AssetPolicy, Budget, BudgetUsage, Config, Proposal, FIRST_STORAGE_VERSION};
 
 const DAY_IN_LEDGERS: u32 = 17_280;
 const INSTANCE_BUMP: u32 = 120 * DAY_IN_LEDGERS;
@@ -33,6 +33,8 @@ pub enum DataKey {
     Allowed(Address),
     Proposal(u64),
     AssetEpoch(Address),
+    // instance (added in storage version 1; append new keys at the end)
+    StorageVersion,
 }
 
 pub fn bump_instance(env: &Env) {
@@ -191,4 +193,25 @@ pub fn get_proposal(env: &Env, id: u64) -> Option<Proposal> {
 
 pub fn set_proposal(env: &Env, proposal: &Proposal) {
     set_persistent(env, &DataKey::Proposal(proposal.id), proposal);
+}
+
+pub fn remove_proposal(env: &Env, id: u64) {
+    env.storage().persistent().remove(&DataKey::Proposal(id));
+}
+
+// ----- storage layout version -----
+
+/// Layout version of the stored data. Treasuries deployed before the
+/// version was recorded use the first layout.
+pub fn get_storage_version(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::StorageVersion)
+        .unwrap_or(FIRST_STORAGE_VERSION)
+}
+
+pub fn set_storage_version(env: &Env, version: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::StorageVersion, &version);
 }

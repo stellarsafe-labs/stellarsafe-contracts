@@ -24,6 +24,16 @@ pub const MIN_FIXED_PERIOD: u64 = 60 * 60;
 pub const MAX_FIXED_PERIOD: u64 = 366 * 24 * 60 * 60;
 /// Upper bound for the governance timelock (30 days).
 pub const MAX_GOVERNANCE_DELAY: u64 = 30 * 24 * 60 * 60;
+/// How long a closed proposal stays in storage before anyone may prune it
+/// (30 days after execution, cancellation or expiry). Events keep the full
+/// history after that.
+pub const PROPOSAL_RETENTION: u64 = 30 * 24 * 60 * 60;
+
+/// Storage layout this code reads and writes. Bump it (and add a step to
+/// `migration::migrate`) whenever a stored type or key changes shape.
+pub const STORAGE_VERSION: u32 = 1;
+/// Layout of treasuries deployed before the version was stored (0.1.0).
+pub const FIRST_STORAGE_VERSION: u32 = 1;
 
 /// Payments of at least `min_amount` need at least `approvals` approvals.
 #[contracttype]

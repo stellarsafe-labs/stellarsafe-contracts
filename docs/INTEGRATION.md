@@ -49,6 +49,8 @@ Each event's first topic is its snake_case name. Topic fields follow, in order. 
 | `config_updated` | `id` | `version: u32`, `action` |
 | `paused` | – | `by: Address` |
 | `deposited` | `token`, `from` | `amount: i128` |
+| `proposal_pruned` | `id` | – (closed proposal deleted from storage) |
+| `storage_migrated` | – | `from: u32`, `to: u32` |
 
 Executing a payment emits `payment_executed`, then the token's own `transfer` event, then `proposal_executed`. Executing a governance action emits `config_updated` followed by `proposal_executed`.
 
@@ -60,6 +62,7 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 4. Approvals are invalidated **implicitly**. When `config_updated` fires, payment approvals in the affected token reset (policy or budget changes), and so do approvals on all governance proposals. Recompute pending approval counts from `get_proposal_state`, not by summing events.
 5. Use `proposal_ready` to notify members that a governance change is scheduled, and guardians that they can still veto it.
 6. RPC nodes keep events for a limited time, so run the indexer continuously and backfill from your own database.
+7. On `proposal_pruned`, keep your copy of the proposal. The contract no longer has it: `get_proposal` returns `ProposalNotFound`.
 
 ## Error codes
 
@@ -87,6 +90,7 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 | 305 | `InsufficientApprovals` | |
 | 306 | `InvalidPagination` | `limit` must be between 1 and 50 |
 | 307 | `TimelockActive` | Governance proposal approved, but `ready_at` not reached |
+| 308 | `ProposalNotPrunable` | Still open, or closed less than 30 days ago |
 | 400 | `InvalidAmount` | Must be > 0 |
 | 401 | `AssetNotAllowed` | Token has no policy |
 | 402 | `AmountExceedsCap` | Above the asset's `max_amount` |
@@ -96,9 +100,17 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 | 406 | `Paused` | |
 | 407 | `InvalidRecipient` | The treasury cannot pay itself |
 | 500 | `Overflow` | |
+| 600 | `MigrationRequired` | Contract was upgraded; call `migrate()` (anyone can) |
+| 601 | `UnsupportedStorageVersion` | Stored data is newer than the code (after a downgrade) |
 
 Codes are stable. New errors get new numbers, and existing numbers are never reused.
 
 ## Storage and TTL
 
 The instance entry (config, members, asset list, proposal counter) and every persistent entry the contract touches get their TTL extended to about 120 days whenever less than about 90 days remain. Entries nobody touches for a long time get archived. Archived entries are not deleted and can be restored with `stellar contract restore`. Simulation reports when a restore is needed.
+
+Open proposals can't be archived: their TTL (at most 90 days) is shorter than the storage TTL. Closed proposals can. Once one has been closed for 30 days, anyone can delete it with `prune_proposals`. Run a keeper that prunes closed proposals before they go untouched for about 90 days. That keeps `get_proposals` pages from hitting archived entries, and stops storage from growing forever.
+
+### Upgrades and migrations
+
+`storage_version()` reports the layout of the stored data. If an upgrade raises it, every write call fails with `MigrationRequired` (600) until someone calls `migrate()`. Whoever executes an `Upgrade` should call `migrate()` straight away; clients that see error 600 can call it themselves. Views keep working throughout.

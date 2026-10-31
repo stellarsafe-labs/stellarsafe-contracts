@@ -16,6 +16,7 @@ mod approvals;
 mod budgets;
 mod governance;
 mod init;
+mod maintenance;
 mod model;
 mod payments;
 mod policy_math;

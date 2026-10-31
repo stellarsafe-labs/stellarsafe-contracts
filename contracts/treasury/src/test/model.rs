@@ -13,10 +13,10 @@ use std::vec;
 use std::vec::Vec;
 
 use proptest::prelude::*;
-use soroban_sdk::{testutils::Address as _, Address};
+use soroban_sdk::{testutils::Address as _, vec as svec, Address};
 
 use super::setup::*;
-use crate::{policy::window_id, Action, Error, Period, ProposalStatus};
+use crate::{policy::window_id, Action, Error, Period, ProposalStatus, PROPOSAL_RETENTION};
 
 // Fixture members in index order.
 const ALICE: usize = 0; // proposer | approver | executor
@@ -50,6 +50,14 @@ enum Op {
     Cancel {
         who: usize,
         id: u64,
+    },
+    Prune {
+        id: u64,
+    },
+    /// Jump to the moment the oldest closed proposal becomes prunable (or
+    /// one second before), then try to prune it.
+    PruneAtEdge {
+        before: bool,
     },
     Advance {
         secs: u64,
@@ -123,7 +131,10 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (actor(&[ALICE, BOB, CAROL]), id()).prop_map(|(who, id)| Op::Revoke { who, id }),
         5 => (actor(&[ALICE, DAVE]), id()).prop_map(|(who, id)| Op::Execute { who, id }),
         1 => (actor(&[ALICE, BOB, GUARDIAN]), id()).prop_map(|(who, id)| Op::Cancel { who, id }),
-        2 => prop_oneof![0u64..=3_600, 0u64..=(2 * DAY), Just(20 * DAY)].prop_map(|secs| Op::Advance { secs }),
+        1 => id().prop_map(|id| Op::Prune { id }),
+        1 => any::<bool>().prop_map(|before| Op::PruneAtEdge { before }),
+        2 => prop_oneof![0u64..=3_600, 0u64..=(2 * DAY), Just(20 * DAY), Just(PROPOSAL_RETENTION)]
+            .prop_map(|secs| Op::Advance { secs }),
         1 => actor(&[GUARDIAN]).prop_map(|who| Op::Pause { who }),
         2 => Just(Op::Unpause),
         1 => any::<bool>().prop_map(|before| Op::ToExpiry { before }),
@@ -164,6 +175,8 @@ struct MProposal {
     expires_at: u64,
     approvals: BTreeMap<usize, u32>, // approver -> epoch
     status: ProposalStatus,
+    closed_at: u64,
+    pruned: bool,
 }
 
 struct Model {
@@ -235,10 +248,7 @@ impl Model {
     }
 
     fn open(&self, id: u64) -> Result<usize, Error> {
-        let p = self
-            .proposals
-            .get(id as usize)
-            .ok_or(Error::ProposalNotFound)?;
+        let p = self.get(id)?;
         if p.status != ProposalStatus::Pending {
             return Err(Error::ProposalNotPending);
         }
@@ -246,6 +256,13 @@ impl Model {
             return Err(Error::ProposalExpired);
         }
         Ok(id as usize)
+    }
+
+    fn get(&self, id: u64) -> Result<&MProposal, Error> {
+        match self.proposals.get(id as usize) {
+            Some(p) if !p.pruned => Ok(p),
+            _ => Err(Error::ProposalNotFound),
+        }
     }
 
     fn valid_approvals(&self, p: &MProposal) -> u32 {
@@ -271,6 +288,8 @@ impl Model {
             expires_at: self.now + ttl,
             approvals: BTreeMap::new(),
             status: ProposalStatus::Pending,
+            closed_at: 0,
+            pruned: false,
         });
         Out::Ok(self.proposals.len() as u64 - 1)
     }
@@ -303,9 +322,11 @@ impl Model {
     }
 
     fn cancel(&mut self, who: usize, id: u64) -> Out {
-        let Some(p) = self.proposals.get_mut(id as usize) else {
-            return Out::Err(Error::ProposalNotFound);
-        };
+        if let Err(e) = self.get(id) {
+            return Out::Err(e);
+        }
+        let now = self.now;
+        let p = &mut self.proposals[id as usize];
         if p.status != ProposalStatus::Pending {
             return Out::Err(Error::ProposalNotPending);
         }
@@ -314,6 +335,7 @@ impl Model {
             return Out::Err(Error::Unauthorized);
         }
         p.status = ProposalStatus::Cancelled;
+        p.closed_at = now;
         Out::Ok(0)
     }
 
@@ -344,6 +366,7 @@ impl Model {
             return Out::Host; // token transfer fails; whole call reverts
         }
         self.proposals[i].status = ProposalStatus::Executed;
+        self.proposals[i].closed_at = self.now;
         self.usage
             .insert(dept, (window_id(&period, self.now), new_spent));
         self.treasury -= amount;
@@ -359,7 +382,36 @@ impl Model {
             expires_at: self.now + TTL,
             approvals: BTreeMap::new(),
             status: ProposalStatus::Executed,
+            closed_at: self.now,
+            pruned: false,
         });
+    }
+
+    /// When proposal `p` closed, for pruning purposes, if it has.
+    fn closed_at(&self, p: &MProposal) -> Option<u64> {
+        match p.status {
+            ProposalStatus::Pending if self.now >= p.expires_at => Some(p.expires_at),
+            ProposalStatus::Pending => None,
+            _ => Some(p.closed_at),
+        }
+    }
+
+    /// Closed proposals may be deleted `PROPOSAL_RETENTION` after they
+    /// closed (expired ones: after `expires_at`).
+    fn prune(&mut self, id: u64) -> Out {
+        let p = match self.get(id) {
+            Ok(p) => p,
+            Err(e) => return Out::Err(e),
+        };
+        let closed_at = match p.status {
+            ProposalStatus::Pending => p.expires_at,
+            _ => p.closed_at,
+        };
+        if self.now < closed_at + PROPOSAL_RETENTION {
+            return Out::Err(Error::ProposalNotPrunable);
+        }
+        self.proposals[id as usize].pruned = true;
+        Out::Ok(1)
     }
 }
 
@@ -388,6 +440,14 @@ fn resolve_ids(op: Op, model: &Model) -> Op {
         Op::Revoke { who, id } => Op::Revoke { who, id: pick(id) },
         Op::Execute { who, id } => Op::Execute { who, id: pick(id) },
         Op::Cancel { who, id } => Op::Cancel { who, id: pick(id) },
+        // Mostly old proposals, which are the ones that can be pruned.
+        Op::Prune { id } => Op::Prune {
+            id: if id % 10 == 0 || count == 0 {
+                count
+            } else {
+                (id / 10) % count
+            },
+        },
         other => other,
     }
 }
@@ -565,6 +625,36 @@ fn run(ops: Vec<Op>) {
                 out(f.client.try_cancel(actors[who], &id), |_| 0),
                 m.cancel(who, id),
             ),
+            Op::Prune { id } => (
+                out(f.client.try_prune_proposals(&svec![&f.env, id]), |n| {
+                    n as u64
+                }),
+                m.prune(id),
+            ),
+            Op::PruneAtEdge { before } => {
+                // Open proposals are taken as closing at expiry.
+                let target = m
+                    .proposals
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| !p.pruned)
+                    .map(|(id, p)| (id as u64, m.closed_at(p).unwrap_or(p.expires_at)))
+                    .min_by_key(|(_, closed)| *closed);
+                match target {
+                    Some((id, closed)) => {
+                        let at = (closed + PROPOSAL_RETENTION - before as u64).max(m.now);
+                        f.advance(at - m.now);
+                        m.now = at;
+                        (
+                            out(f.client.try_prune_proposals(&svec![&f.env, id]), |n| {
+                                n as u64
+                            }),
+                            m.prune(id),
+                        )
+                    }
+                    None => (Out::Ok(0), Out::Ok(0)),
+                }
+            }
             Op::Advance { secs } => {
                 f.advance(secs);
                 m.now += secs;
@@ -624,8 +714,17 @@ fn run(ops: Vec<Op>) {
         }
         assert_eq!(f.client.proposal_count(), m.proposals.len() as u64);
         for (id, p) in m.proposals.iter().enumerate() {
-            let stored = f.client.get_proposal(&(id as u64)).status;
-            assert_eq!(stored, p.status, "proposal {id} status, step {step}");
+            let stored = f.client.try_get_proposal(&(id as u64));
+            if p.pruned {
+                assert_eq!(
+                    stored,
+                    Err(Ok(Error::ProposalNotFound)),
+                    "proposal {id} pruned, step {step}"
+                );
+            } else {
+                let status = stored.unwrap().unwrap().status;
+                assert_eq!(status, p.status, "proposal {id} status, step {step}");
+            }
         }
     }
 }
