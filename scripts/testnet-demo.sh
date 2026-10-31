@@ -110,6 +110,10 @@ echo "  treasury: $TREASURY" >&2
 
 log "Fund treasury"
 call "Issuer mints 20,000 SSUSD to the treasury" issuer "$TOKEN" -- mint --to "$TREASURY" --amount "$((20000 * UNIT))"
+# The issuer can transfer without holding a balance, so it can fund the
+# treasury through deposit() without a trustline.
+call "Issuer deposits 1,000 SSUSD through deposit()" issuer "$TREASURY" -- deposit \
+  --from "$(addr issuer)" --token "$TOKEN" --amount "$((1000 * UNIT))"
 
 log "Payment below 500: one approval"
 call "Bob proposes 100 SSUSD to vendor (dept 1)" bob "$TREASURY" -- propose_payment \
