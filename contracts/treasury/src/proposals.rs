@@ -4,9 +4,11 @@
 use soroban_sdk::{Address, Env, Map};
 
 use crate::errors::Error;
+use crate::policy::required_approvals;
 use crate::storage as st;
 use crate::types::{
-    Action, Config, Proposal, ProposalStatus, PROPOSAL_RETENTION, ROLE_APPROVER, ROLE_GUARDIAN,
+    Action, Config, Payment, Proposal, ProposalStatus, PROPOSAL_RETENTION, ROLE_APPROVER,
+    ROLE_GUARDIAN,
 };
 
 pub fn require_role(members: &Map<Address, u32>, who: &Address, role: u32) -> Result<(), Error> {
@@ -31,10 +33,6 @@ pub fn ensure_open(env: &Env, proposal: &Proposal) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn is_payment(action: &Action) -> bool {
-    matches!(action, Action::Payment(_))
-}
-
 /// Epoch that approvals on `proposal` must carry to count.
 pub fn approval_epoch(env: &Env, proposal: &Proposal, config: &Config) -> u32 {
     match &proposal.action {
@@ -43,8 +41,37 @@ pub fn approval_epoch(env: &Env, proposal: &Proposal, config: &Config) -> u32 {
     }
 }
 
-/// Governance proposals may only run once the timelock that started when
-/// they reached the threshold, in the current epoch, has ended.
+/// Payment timelock that applies to `payment` under its token's current
+/// rules, or `None` if the payment is below `delay_from` or the token has no
+/// timelock.
+pub fn payment_delay(env: &Env, payment: &Payment) -> Option<u64> {
+    st::get_payment_timelock(env, &payment.token)
+        .filter(|timelock| payment.amount >= timelock.delay_from)
+        .map(|timelock| timelock.delay)
+}
+
+/// Timelock that starts when `action` reaches its required approvals:
+/// `governance_delay` for governance, the token's payment timelock for
+/// large payments, and `None` for payments that are not delayed.
+pub fn action_delay(env: &Env, action: &Action, config: &Config) -> Option<u64> {
+    match action {
+        Action::Payment(payment) => payment_delay(env, payment),
+        _ => Some(config.governance_delay),
+    }
+}
+
+/// Approvals `action` needs under the current rules. `None` for a payment
+/// whose token has no asset policy (it cannot execute at all).
+pub fn required_now(env: &Env, action: &Action, config: &Config) -> Option<u32> {
+    match action {
+        Action::Payment(payment) => st::get_asset_policy(env, &payment.token)
+            .map(|policy| required_approvals(&policy, payment.amount)),
+        _ => Some(config.governance_threshold),
+    }
+}
+
+/// Timelocked proposals may only run once the timelock that started when
+/// they reached their required approvals, in the current epoch, has ended.
 pub fn check_timelock(env: &Env, proposal: &Proposal, epoch: u32) -> Result<(), Error> {
     match proposal.ready_at {
         Some(ready_at) if proposal.ready_epoch == epoch => {

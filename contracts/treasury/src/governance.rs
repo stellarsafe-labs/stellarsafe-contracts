@@ -8,8 +8,9 @@ use crate::payments::validate_payment;
 use crate::policy::{max_tier_approvals, validate_asset_policy, validate_budget};
 use crate::storage as st;
 use crate::types::{
-    Action, AssetPolicy, Config, ALL_ROLES, MAX_ASSETS, MAX_GOVERNANCE_DELAY, MAX_MEMBERS,
-    MAX_PROPOSAL_TTL_CAP, MIN_PROPOSAL_TTL_CAP, ROLE_APPROVER, ROLE_EXECUTOR, ROLE_PROPOSER,
+    Action, AssetPolicy, Config, PaymentTimelock, ALL_ROLES, MAX_ASSETS, MAX_GOVERNANCE_DELAY,
+    MAX_MEMBERS, MAX_PAYMENT_DELAY, MAX_PROPOSAL_TTL_CAP, MIN_PROPOSAL_TTL_CAP, ROLE_APPROVER,
+    ROLE_EXECUTOR, ROLE_PROPOSER,
 };
 
 fn validate_roles(roles: u32) -> Result<(), Error> {
@@ -29,6 +30,19 @@ pub fn validate_member(env: &Env, member: &Address, roles: u32) -> Result<(), Er
 pub fn validate_ttl_cap(ttl: u64) -> Result<(), Error> {
     if !(MIN_PROPOSAL_TTL_CAP..=MAX_PROPOSAL_TTL_CAP).contains(&ttl) {
         return Err(Error::InvalidTtl);
+    }
+    Ok(())
+}
+
+/// A payment timelock must delay some positive amount by a non-zero time of
+/// at most `MAX_PAYMENT_DELAY`. That it is shorter than `max_proposal_ttl`
+/// is checked by `check_invariants`.
+pub fn validate_payment_timelock(timelock: &PaymentTimelock) -> Result<(), Error> {
+    if timelock.delay_from <= 0 {
+        return Err(Error::InvalidPolicy);
+    }
+    if timelock.delay == 0 || timelock.delay > MAX_PAYMENT_DELAY {
+        return Err(Error::InvalidDelay);
     }
     Ok(())
 }
@@ -65,6 +79,7 @@ pub fn prevalidate(env: &Env, config: &Config, action: &Action) -> Result<(), Er
         }
         Action::SetAssetPolicy(_, policy) => validate_asset_policy(policy),
         Action::SetBudget(_, _, budget) => validate_budget(budget),
+        Action::SetPaymentTimelock(_, timelock) => validate_payment_timelock(timelock),
         _ => Ok(()),
     }
 }
@@ -138,6 +153,20 @@ pub fn apply_governance(
             .update_current_contract(ContractExecutable::Wasm(wasm_hash.clone())),
         Action::SetGovernanceDelay(delay) => config.governance_delay = *delay,
         Action::SetIndependentExecutor(on) => st::set_independent_executor(env, *on),
+        // Like any change to a token's rules, this resets approvals (and
+        // with them any running timelock) on pending payments in the token.
+        Action::SetPaymentTimelock(token, timelock) => {
+            validate_payment_timelock(timelock)?;
+            st::set_payment_timelock(env, token, timelock);
+            st::bump_asset_epoch(env, token);
+        }
+        Action::RemovePaymentTimelock(token) => {
+            if st::get_payment_timelock(env, token).is_none() {
+                return Err(Error::NotConfigured);
+            }
+            st::remove_payment_timelock(env, token);
+            st::bump_asset_epoch(env, token);
+        }
     }
     Ok(())
 }
@@ -184,6 +213,12 @@ pub fn check_invariants(
             return Err(Error::InvalidThreshold);
         }
         most_approvals = most_approvals.max(tier_max);
+        // A timelocked payment must be able to run before it expires.
+        if let Some(timelock) = st::get_payment_timelock(env, &token) {
+            if timelock.delay >= config.max_proposal_ttl {
+                return Err(Error::InvalidDelay);
+            }
+        }
     }
     // With independent execution, some executor must be able to run every
     // proposal without being one of the approvers it needs.

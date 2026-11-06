@@ -3,14 +3,17 @@
 //! * Instance storage (lives and dies with the contract instance): config,
 //!   member set, list of assets with a policy, proposal counter, storage
 //!   layout version. All of these are bounded (see `MAX_MEMBERS`, `MAX_ASSETS`).
-//! * Persistent storage: asset policies, budgets, spend counters, allowlist
-//!   entries and proposals. Persistent entries are archived (not deleted) when
-//!   their TTL runs out and can be restored, so spend counters can never be
-//!   silently reset. Temporary storage is deliberately not used.
+//! * Persistent storage: asset policies, payment timelocks, budgets, spend
+//!   counters, allowlist entries and proposals. Persistent entries are
+//!   archived (not deleted) when their TTL runs out and can be restored, so
+//!   spend counters can never be silently reset. Temporary storage is
+//!   deliberately not used.
 
 use soroban_sdk::{contracttype, Address, Env, Map, Vec};
 
-use crate::types::{AssetPolicy, Budget, BudgetUsage, Config, Proposal, FIRST_STORAGE_VERSION};
+use crate::types::{
+    AssetPolicy, Budget, BudgetUsage, Config, PaymentTimelock, Proposal, FIRST_STORAGE_VERSION,
+};
 
 const DAY_IN_LEDGERS: u32 = 17_280;
 const INSTANCE_BUMP: u32 = 120 * DAY_IN_LEDGERS;
@@ -36,6 +39,8 @@ pub enum DataKey {
     // instance (added in storage version 1; append new keys at the end)
     StorageVersion,
     IndependentExecutor,
+    // persistent
+    PaymentTimelock(Address),
 }
 
 pub fn bump_instance(env: &Env) {
@@ -231,4 +236,20 @@ pub fn set_independent_executor(env: &Env, on: bool) {
     env.storage()
         .instance()
         .set(&DataKey::IndependentExecutor, &on);
+}
+
+// ----- payment timelocks -----
+
+pub fn get_payment_timelock(env: &Env, token: &Address) -> Option<PaymentTimelock> {
+    get_persistent(env, &DataKey::PaymentTimelock(token.clone()))
+}
+
+pub fn set_payment_timelock(env: &Env, token: &Address, timelock: &PaymentTimelock) {
+    set_persistent(env, &DataKey::PaymentTimelock(token.clone()), timelock);
+}
+
+pub fn remove_payment_timelock(env: &Env, token: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::PaymentTimelock(token.clone()));
 }

@@ -23,7 +23,7 @@ The contract spec embedded in the Wasm describes every function, type, error and
 { status: Pending | Executed | Cancelled | Expired,
   approvals: number,         // approvals that count right now
   required: number,          // under the current policy
-  ready_at?: number,         // governance: when the timelock ends
+  ready_at?: number,         // governance or timelocked payment: when the timelock ends
   blocked_by?: number }      // error code `execute` would hit, if any
 ```
 
@@ -41,7 +41,7 @@ Each event's first topic is its snake_case name. Topic fields follow, in order. 
 |-------|--------|------|
 | `proposal_created` | `id: u64`, `proposer: Address` | `action`, `expires_at: u64`, `config_version: u32`, `metadata_hash?: BytesN<32>` |
 | `proposal_approved` | `id`, `approver` | `approvals: u32` (count after this approval) |
-| `proposal_ready` | `id` | `ready_at: u64` (governance proposal reached its threshold; timelock started) |
+| `proposal_ready` | `id` | `ready_at: u64` (governance proposal, or payment covered by its token's payment timelock, reached its required approvals; timelock started) |
 | `approval_revoked` | `id`, `approver` | – |
 | `proposal_cancelled` | `id` | `by: Address` |
 | `proposal_executed` | `id` | `executor: Address` |
@@ -90,7 +90,7 @@ Executing a payment emits `payment_executed`, then the token's own `transfer` ev
 | 304 | `NotApproved` | Nothing to revoke |
 | 305 | `InsufficientApprovals` | |
 | 306 | `InvalidPagination` | `limit` must be between 1 and 50 |
-| 307 | `TimelockActive` | Governance proposal approved, but `ready_at` not reached |
+| 307 | `TimelockActive` | Governance proposal or timelocked payment approved, but `ready_at` not reached |
 | 308 | `ProposalNotPrunable` | Still open, or closed less than 30 days ago |
 | 309 | `ExecutorApproved` | Independent execution on and the caller's approval counts: another executor must run it |
 | 310 | `TimelockOutlivesProposal` | Reaching the threshold now would start a timelock that ends at or after expiry. Re-propose with a longer TTL |

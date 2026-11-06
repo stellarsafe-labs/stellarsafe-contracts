@@ -24,6 +24,8 @@ pub const MIN_FIXED_PERIOD: u64 = 60 * 60;
 pub const MAX_FIXED_PERIOD: u64 = 366 * 24 * 60 * 60;
 /// Upper bound for the governance timelock (30 days).
 pub const MAX_GOVERNANCE_DELAY: u64 = 30 * 24 * 60 * 60;
+/// Upper bound for a payment timelock (30 days).
+pub const MAX_PAYMENT_DELAY: u64 = 30 * 24 * 60 * 60;
 /// How long a closed proposal stays in storage before anyone may prune it
 /// (30 days after execution, cancellation or expiry). Events keep the full
 /// history after that.
@@ -52,6 +54,20 @@ pub struct AssetPolicy {
     /// Sorted by `min_amount` (strictly increasing, first tier starts at 0),
     /// with non-decreasing `approvals`. The highest matching tier applies.
     pub tiers: Vec<ApprovalTier>,
+}
+
+/// Optional timelock for large payments in one token. Payments of at least
+/// `delay_from` wait `delay` seconds after reaching their required approvals
+/// before they can execute; guardians can veto them in that time. Smaller
+/// payments are not delayed. Stored apart from `AssetPolicy`, so adding it
+/// needed no storage migration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentTimelock {
+    /// Smallest delayed amount, in the token's base units (must be > 0).
+    pub delay_from: i128,
+    /// Seconds to wait, `1..=MAX_PAYMENT_DELAY` and below `max_proposal_ttl`.
+    pub delay: u64,
 }
 
 /// Accounting period for department budgets. All periods are UTC and derived
@@ -138,6 +154,11 @@ pub enum Action {
     /// When on, a proposal cannot be executed by a member whose approval
     /// counts on it, so no single key can both approve and execute.
     SetIndependentExecutor(bool),
+    /// Set the payment timelock of a token. Like other changes to a token's
+    /// rules, this resets approvals on pending payments in that token.
+    SetPaymentTimelock(Address, PaymentTimelock),
+    /// Remove a token's payment timelock (also resets its approvals).
+    RemovePaymentTimelock(Address),
 }
 
 #[contracttype]
@@ -172,9 +193,10 @@ pub struct Proposal {
     /// * Governance proposals use `Config::version`, which changes on every
     ///   executed governance action.
     pub approvals: Map<Address, u32>,
-    /// Governance only: earliest execution time, set when the proposal
-    /// reaches the threshold (`now + governance_delay`). Cleared when it
-    /// drops below the threshold again.
+    /// Earliest execution time, set when the proposal reaches its required
+    /// approvals: `now + governance_delay` for governance, `now + delay` for
+    /// payments covered by their token's `PaymentTimelock` (otherwise
+    /// `None`). Cleared when approvals drop below the requirement again.
     pub ready_at: Option<u64>,
     /// Epoch `ready_at` was computed under; a stale `ready_at` is ignored.
     pub ready_epoch: u32,
@@ -192,8 +214,8 @@ pub struct ProposalState {
     pub approvals: u32,
     /// Approvals required under the current policy (0 if a policy check fails).
     pub required: u32,
-    /// Governance only: when the timelock ends (if the threshold was reached
-    /// in the current epoch).
+    /// When the timelock ends, for governance and timelocked payments (if
+    /// the required approvals were reached in the current epoch).
     pub ready_at: Option<u64>,
     /// `None` if the proposal could be executed right now, otherwise the
     /// error code `execute` would fail with.

@@ -13,6 +13,8 @@
 //!
 //! Configuration changes need `governance_threshold` approvals, then wait
 //! out `governance_delay` (a timelock during which guardians can veto).
+//! Large payments can be timelocked the same way, per token
+//! (`PaymentTimelock`).
 //!
 //! Approvals are tied to an *approval epoch* so they stop counting when the
 //! rules they were given under change: payments are invalidated only by
@@ -47,8 +49,9 @@ use crate::migration::enter;
 use crate::payments::payment_plan;
 use crate::policy::{validate_budget, window_id};
 use crate::proposals::{
-    approval_epoch, check_timelock, count_valid_approvals, counts_approval, ensure_open,
-    ensure_prunable, is_payment, load_proposal, require_role, targets_guardian,
+    action_delay, approval_epoch, check_timelock, count_valid_approvals, counts_approval,
+    ensure_open, ensure_prunable, load_proposal, payment_delay, require_role, required_now,
+    targets_guardian,
 };
 use crate::storage as st;
 
@@ -118,8 +121,8 @@ impl Treasury {
         if ttl == 0 || ttl > config.max_proposal_ttl {
             return Err(Error::InvalidTtl);
         }
-        // A governance proposal must outlive its timelock to be executable.
-        if !is_payment(&action) && ttl <= config.governance_delay {
+        // A timelocked proposal must outlive its timelock to be executable.
+        if action_delay(&env, &action, &config).is_some_and(|delay| ttl <= delay) {
             return Err(Error::InvalidTtl);
         }
         prevalidate(&env, &config, &action)?;
@@ -191,28 +194,32 @@ impl Treasury {
         if proposal.approvals.get(approver.clone()) == Some(epoch) {
             return Err(Error::AlreadyApproved);
         }
+        let before = count_valid_approvals(&proposal, &members, epoch);
         proposal.approvals.set(approver.clone(), epoch);
         let approvals = count_valid_approvals(&proposal, &members, epoch);
 
-        // Start the timelock the first time a governance proposal reaches the
-        // threshold in this epoch.
+        // Start the timelock when a timelocked proposal reaches its required
+        // approvals: the first time in this epoch, or again after it dropped
+        // below them (e.g. an approver lost the role).
         let mut ready = None;
-        if !is_payment(&proposal.action)
-            && approvals >= config.governance_threshold
-            && (proposal.ready_at.is_none() || proposal.ready_epoch != epoch)
-        {
-            let ready_at = env
-                .ledger()
-                .timestamp()
-                .checked_add(config.governance_delay)
-                .ok_or(Error::Overflow)?;
-            // Execution needs `ready_at <= now < expires_at`.
-            if ready_at >= proposal.expires_at {
-                return Err(Error::TimelockOutlivesProposal);
+        let delay = action_delay(&env, &proposal.action, &config);
+        let required = required_now(&env, &proposal.action, &config);
+        if let (Some(delay), Some(required)) = (delay, required) {
+            let running = proposal.ready_at.is_some() && proposal.ready_epoch == epoch;
+            if approvals >= required && (before < required || !running) {
+                let ready_at = env
+                    .ledger()
+                    .timestamp()
+                    .checked_add(delay)
+                    .ok_or(Error::Overflow)?;
+                // Execution needs `ready_at <= now < expires_at`.
+                if ready_at >= proposal.expires_at {
+                    return Err(Error::TimelockOutlivesProposal);
+                }
+                proposal.ready_at = Some(ready_at);
+                proposal.ready_epoch = epoch;
+                ready = Some(ready_at);
             }
-            proposal.ready_at = Some(ready_at);
-            proposal.ready_epoch = epoch;
-            ready = Some(ready_at);
         }
         st::set_proposal(&env, &proposal);
 
@@ -238,12 +245,14 @@ impl Treasury {
         if proposal.approvals.remove(approver.clone()).is_none() {
             return Err(Error::NotApproved);
         }
-        if !is_payment(&proposal.action) {
+        if proposal.ready_at.is_some() {
             let config = st::get_config(&env);
             let members = st::get_members(&env);
-            let approvals = count_valid_approvals(&proposal, &members, config.version);
-            if approvals < config.governance_threshold {
-                // Dropping below the threshold restarts the timelock.
+            let epoch = approval_epoch(&env, &proposal, &config);
+            let approvals = count_valid_approvals(&proposal, &members, epoch);
+            let required = required_now(&env, &proposal.action, &config);
+            if required.is_none_or(|required| approvals < required) {
+                // Dropping below the requirement restarts the timelock.
                 proposal.ready_at = None;
             }
         }
@@ -305,6 +314,9 @@ impl Treasury {
                 let plan = payment_plan(&env, &config, &payment)?;
                 if approvals < plan.required {
                     return Err(Error::InsufficientApprovals);
+                }
+                if payment_delay(&env, &payment).is_some() {
+                    check_timelock(&env, &proposal, epoch)?;
                 }
                 st::set_proposal(&env, &proposal);
                 st::set_budget_usage(
@@ -479,6 +491,11 @@ impl Treasury {
         st::get_asset_policy(&env, &token)
     }
 
+    /// Payment timelock of `token`, if any (`Action::SetPaymentTimelock`).
+    pub fn get_payment_timelock(env: Env, token: Address) -> Option<PaymentTimelock> {
+        st::get_payment_timelock(&env, &token)
+    }
+
     /// Budget and spend for the window containing the current ledger time.
     pub fn get_budget(env: Env, department: u32, token: Address) -> Option<BudgetStatus> {
         let budget = st::get_budget(&env, department, &token)?;
@@ -559,22 +576,23 @@ impl Treasury {
             ProposalStatus::Expired => (0, Some(Error::ProposalExpired as u32)),
             _ => (0, Some(Error::ProposalNotPending as u32)),
         };
+        let delay = match status {
+            ProposalStatus::Pending => action_delay(&env, &proposal.action, &config),
+            _ => None,
+        };
         if blocked_by.is_none() && approvals < required {
-            // A governance proposal that would reach its threshold now could
-            // still never run if the timelock outlasts it.
-            let too_late = !is_payment(&proposal.action)
-                && env
-                    .ledger()
-                    .timestamp()
-                    .saturating_add(config.governance_delay)
-                    >= proposal.expires_at;
+            // A timelocked proposal that would reach its requirement now
+            // could still never run if the timelock outlasts it.
+            let too_late = delay.is_some_and(|delay| {
+                env.ledger().timestamp().saturating_add(delay) >= proposal.expires_at
+            });
             blocked_by = Some(if too_late {
                 Error::TimelockOutlivesProposal
             } else {
                 Error::InsufficientApprovals
             } as u32);
         }
-        if blocked_by.is_none() && !is_payment(&proposal.action) {
+        if blocked_by.is_none() && delay.is_some() {
             blocked_by = check_timelock(&env, &proposal, epoch)
                 .err()
                 .map(|e| e as u32);

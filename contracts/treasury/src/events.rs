@@ -29,7 +29,9 @@ pub struct ProposalApproved {
     pub approvals: u32,
 }
 
-/// A governance proposal reached its threshold; it can execute at `ready_at`.
+/// A timelocked proposal (governance, or a payment covered by its token's
+/// `PaymentTimelock`) reached its required approvals; it can execute at
+/// `ready_at`.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProposalReady {

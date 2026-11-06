@@ -73,6 +73,7 @@ Everything is a **proposal** carrying an `Action`:
 | `Upgrade(wasm_hash)`                      | `governance_threshold`            |
 | `SetGovernanceDelay(seconds)`             | `governance_threshold`            |
 | `SetIndependentExecutor(bool)`            | `governance_threshold`            |
+| `SetPaymentTimelock(token, timelock)`, `RemovePaymentTimelock(token)` | `governance_threshold` |
 
 Everything except payments is a **governance action**. Governance actions are timelocked (see below).
 
@@ -82,18 +83,21 @@ Everything except payments is a **governance action**. Governance actions are ti
 
 | Proposal kind | Its approvals stop counting when |
 |---------------|----------------------------------|
-| Payment in token X | X's asset policy or any of X's budgets changes |
+| Payment in token X | X's asset policy, payment timelock or any of X's budgets changes |
 | Governance | any governance action executes (`config.version` increments) |
 
 Unrelated changes, such as adding a member, editing the allowlist, or touching another token's policy, leave pending payment approvals intact. Allowlist changes don't need to reset anything, because the allowlist is checked again at execution. An approval also stops counting if the approver is removed or loses the approver role.
 
-**Governance timelock.** When a governance proposal reaches `governance_threshold` approvals, its `ready_at` is set to `now + governance_delay`. `execute` fails with `TimelockActive` until that time. If approvals drop below the threshold, or the epoch changes, the timer starts over. During the delay a guardian can **veto** (cancel) the proposal. The one exception: guardians cannot veto removing or changing the roles of a guardian, so a rogue guardian can always be removed. The delay is limited to 30 days and must be shorter than `max_proposal_ttl`. Governance proposals need a TTL longer than the delay. Payments are not timelocked.
+**Governance timelock.** When a governance proposal reaches `governance_threshold` approvals, its `ready_at` is set to `now + governance_delay`. `execute` fails with `TimelockActive` until that time. If approvals drop below the threshold, or the epoch changes, the timer starts over. During the delay a guardian can **veto** (cancel) the proposal. The one exception: guardians cannot veto removing or changing the roles of a guardian, so a rogue guardian can always be removed. The delay is limited to 30 days and must be shorter than `max_proposal_ttl`. Governance proposals need a TTL longer than the delay.
+
+**Payment timelock.** Payments execute as soon as they are approved, unless their token has a `PaymentTimelock { delay_from, delay }` (set with `SetPaymentTimelock`). Then a payment of at least `delay_from` gets `ready_at = now + delay` when it reaches its tier's approvals, and `execute` fails with `TimelockActive` until then. As with governance, the timer starts over if approvals drop below the tier's requirement (a revoke, or an approver losing the role) or the token's epoch changes, and guardians can veto during the delay. Setting or removing a timelock changes the token's epoch, so payments approved earlier must be approved again. Smaller payments, and tokens without a timelock, are unaffected. `delay_from` must be positive, `delay` 1 second to 30 days and shorter than `max_proposal_ttl`, and a delayed payment needs a TTL longer than `delay`.
 
 **Safety invariants.** These are checked after construction and after every governance action. A change that would break one is rejected, so the treasury cannot lock itself out:
 
 - 1 to 50 members; at least one proposer, one approver and one executor.
 - `1 <= governance_threshold <= number of approvers`.
 - `governance_delay <= 30 days` and `governance_delay < max_proposal_ttl`.
+- Every payment timelock on an asset with a policy has `delay < max_proposal_ttl`.
 - No asset tier requires more approvals than there are approvers.
 - At most 20 assets with a policy.
 
@@ -172,7 +176,7 @@ How the functions in the original spec map to this contract:
 | `approve(approver, id) -> u32` | approver | Returns the number of approvals that count. Re-approving after an epoch change refreshes the approval. Starts the timelock when a governance proposal reaches its threshold |
 | `revoke_approval(approver, id)` | approver | Former members can also revoke |
 | `cancel(caller, id)` | proposer, or guardian (veto; not for actions targeting a guardian) | Also works on expired proposals (cleanup) |
-| `execute(executor, id)` | executor | Re-checks everything; governance also needs `now >= ready_at`. The only path out of the treasury |
+| `execute(executor, id)` | executor | Re-checks everything; governance and timelocked payments also need `now >= ready_at`. The only path out of the treasury |
 | `pause(guardian)` | guardian | Blocks payment execution |
 | `deposit(from, token, amount)` | from | Optional; plain transfers to the contract address work too |
 | `prune_proposals(ids) -> u32` | anyone | Deletes 1–50 proposals that were executed, cancelled or expired at least 30 days ago. All or nothing. Ids are never reused; events keep the history |
@@ -180,7 +184,7 @@ How the functions in the original spec map to this contract:
 
 ### Reads
 
-`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`, `storage_version`, `independent_executor`. Pruned proposals return `ProposalNotFound` and are skipped by `get_proposals`.
+`get_config`, `get_members`, `get_roles(addr)`, `get_policy_assets`, `get_asset_policy(token)`, `get_payment_timelock(token)`, `get_budget(department, token) -> BudgetStatus` (limit, spent, remaining in the current window), `is_recipient_allowed(addr)`, `get_proposal(id)`, `get_proposals(start, limit)`, `proposal_count`, `get_proposal_state(id)` (live status, counted approvals, required approvals, timelock end, and the error `execute` would return right now), `contract_version`, `storage_version`, `independent_executor`. Pruned proposals return `ProposalNotFound` and are skipped by `get_proposals`.
 
 Error codes are listed in [`errors.rs`](contracts/treasury/src/errors.rs) and in the [integration guide](docs/INTEGRATION.md#error-codes).
 

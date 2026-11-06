@@ -6,7 +6,8 @@ use soroban_sdk::{testutils::Address as _, vec, Address};
 
 use super::setup::*;
 use crate::{
-    Action, ApprovalTier, AssetPolicy, MAX_ASSETS, MAX_MEMBERS, ROLE_APPROVER, ROLE_PROPOSER,
+    Action, ApprovalTier, AssetPolicy, PaymentTimelock, MAX_ASSETS, MAX_MEMBERS, ROLE_APPROVER,
+    ROLE_PROPOSER,
 };
 
 #[test]
@@ -21,7 +22,11 @@ fn max_members_max_assets_full_approval_set_fits_limits() {
     }
     assert_eq!(f.client.get_members().len(), MAX_MEMBERS);
 
-    // Grow to MAX_ASSETS (1 already present).
+    // Grow to MAX_ASSETS (1 already present), each with a payment timelock.
+    let timelock = PaymentTimelock {
+        delay_from: 1,
+        delay: 60,
+    };
     for _ in 1..MAX_ASSETS {
         let token = Address::generate(&f.env);
         let policy = AssetPolicy {
@@ -34,8 +39,11 @@ fn max_members_max_assets_full_approval_set_fits_limits() {
                 },
             ],
         };
-        f.govern(Action::SetAssetPolicy(token, policy));
+        f.govern(Action::SetAssetPolicy(token.clone(), policy));
+        f.govern(Action::SetPaymentTimelock(token, timelock.clone()));
     }
+    // Every asset is timelocked, so every invariant check reads them all.
+    f.govern(Action::SetPaymentTimelock(f.usdc.clone(), timelock));
     assert_eq!(f.client.get_policy_assets().len(), MAX_ASSETS);
     let one_more = Address::generate(&f.env);
     assert_eq!(
@@ -56,6 +64,7 @@ fn max_members_max_assets_full_approval_set_fits_limits() {
         f.client.approve(a, &pay);
     }
     assert_eq!(f.client.get_proposal_state(&pay).approvals, 48);
+    f.advance(60);
     f.client.execute(&f.dave, &pay);
 
     for a in [&f.alice, &f.bob, &f.carol].into_iter().chain(extra.iter()) {
